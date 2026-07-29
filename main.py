@@ -12,7 +12,7 @@ from googleapiclient.http import MediaIoBaseUpload
 # --- 1. CONFIGURACIÓN ---
 YUPOO_URL = "https://wavesoccer.x.yupoo.com/albums/7069514?uid=1&isSubCate=false&referrercate=2918263"
 # PON AQUÍ EL ID DE TU CARPETA 'NOVEDADES'
-DRIVE_FOLDER_ID = "POSA_L_ID_AQUI" 
+DRIVE_FOLDER_ID = 1lJqeU3-rsy83VDvIF6_AxFH5Qq_JA17C 
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
