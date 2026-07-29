@@ -8,8 +8,7 @@ import google.generativeai as genai
 
 # --- 1. CONFIGURACIÓ ---
 YUPOO_URL = "https://wavesoccer.x.yupoo.com/albums/7069514?uid=1&isSubCate=false&referrercate=2918263"
-# AQUÍ TENIM LA URL DE LA TEVA APP WEB JA INCORPORADA:
-WEB_APP_URL = "https://script.google.com/macros/s/AKfycbzMChzqPXGvVClTuqPKyCEBgfXY_BYtyFcPjYRNgxos0PUkcfl-ZCFQCG_7p3yOnBkjpA/exec" 
+WEB_APP_URL = "https://script.google.com/macros/s/AKfycby6a5-b100c1__2Y85EehYlYKKf5zbEV5TudfgNEGh-e40NhGk2OmKrrDWYylK3XqiVbA/exec" 
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
@@ -25,10 +24,9 @@ model = genai.GenerativeModel('gemini-1.5-flash')
 def es_frontal(image_bytes):
     try:
         img = Image.open(io.BytesIO(image_bytes))
-        response = model.generate_content([
-            "Aquesta és la imatge d'una samarreta. És la part frontal/davantera principal? Respon només 'SI' o 'NO'.",
-            img
-        ])
+        # Millorem el prompt perquè la IA sigui més exacta
+        prompt = "Ets un expert en roba esportiva. A la imatge es veu principalment la PART FRONTAL (la de davant, on normalment hi ha l'escut i la marca) d'una samarreta de futbol? Respon només 'SI' o 'NO'."
+        response = model.generate_content([prompt, img])
         return "SI" in response.text.upper()
     except Exception as e:
         print(f"⚠️ Error analitzant amb IA. Es descarregarà per seguretat.")
@@ -36,7 +34,6 @@ def es_frontal(image_bytes):
 
 def pujar_a_drive(image_bytes, filename):
     try:
-        # Convertim la imatge per enviar-la pel pont (Google Apps Script)
         base64_data = base64.b64encode(image_bytes).decode('utf-8')
         payload = {
             "fileName": filename,
@@ -57,15 +54,23 @@ def main():
     imatges_tags = soup.find_all('img')
     urls_imatges = []
     
+    # --- FILTRE MILLORAT PER YUPOO ---
     for img in imatges_tags:
-        src = img.get('data-origin-src') or img.get('src')
+        # Busquem la foto real als atributs amagats
+        src = img.get('data-origin-src') or img.get('data-src') or img.get('src')
+        
         if src:
             if src.startswith('//'):
                 src = 'https:' + src
-            if 'yupoo.com' in src:
-                urls_imatges.append(src)
+            
+            # Les fotos reals de productes a Yupoo SEMPRE es guarden a photo.yupoo.com
+            # Si no té això, és un logo o un botó de la web.
+            if 'photo.yupoo.com' in src.lower():
+                # Evitem afegir imatges duplicades
+                if src not in urls_imatges:
+                    urls_imatges.append(src)
                 
-    print(f"Trobades {len(urls_imatges)} imatges noves pendents de processar.")
+    print(f"Trobades {len(urls_imatges)} imatges reals de productes pendents de processar.")
 
     for i, img_url in enumerate(urls_imatges, 1):
         print(f"Analitzant imatge {i}/{len(urls_imatges)}...")
@@ -87,7 +92,7 @@ def main():
             else:
                 print(f"❌ Error al pujar: {resultat}")
         else:
-            print("❌ No és frontal. Descartada.")
+            print("❌ No és frontal (és la part del darrere o detalls). Descartada.")
 
 if __name__ == "__main__":
     main()
