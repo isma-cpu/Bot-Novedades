@@ -9,7 +9,7 @@ import google.generativeai as genai
 # --- 1. CONFIGURACIÓ ---
 YUPOO_URL = "https://wavesoccer.x.yupoo.com/albums/7069514?uid=1&isSubCate=false&referrercate=2918263"
 # AQUÍ TENIM LA URL DE LA TEVA APP WEB JA INCORPORADA:
-WEB_APP_URL = "https://script.google.com/macros/s/AKfycby6a5-b100c1__2Y85EehYlYKKf5zbEV5TudfgNEGh-e40NhGk2OmKrrDWYylK3XqiVbA/exec" 
+WEB_APP_URL = "https://script.google.com/macros/s/AKfycbzMChzqPXGvVClTuqPKyCEBgfXY_BYtyFcPjYRNgxos0PUkcfl-ZCFQCG_7p3yOnBkjpA/exec" 
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
