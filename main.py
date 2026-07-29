@@ -1,5 +1,6 @@
 import os
 import io
+import json
 import requests
 from bs4 import BeautifulSoup
 from PIL import Image
@@ -8,27 +9,39 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 
-# --- 1. CONFIGURACIÓ ---
+# --- 1. CONFIGURACIÓN ---
 YUPOO_URL = "https://wavesoccer.x.yupoo.com/albums/7069514?uid=1&isSubCate=false&referrercate=2918263"
-# POSA AQUÍ L'ID DE LA TEVA CARPETA 'NOVEDADES'
+# PON AQUÍ EL ID DE TU CARPETA 'NOVEDADES'
 DRIVE_FOLDER_ID = "POSA_L_ID_AQUI" 
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
-# Capçaleres per saltar-nos l'anti-bot de Yupoo (Soluciona l'error 567)
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Referer": "https://yupoo.com/" 
 }
 
-# --- 2. INICIALITZACIÓ ---
+# --- 2. INICIALIZACIÓN ---
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash') # Nom del model corregit
+model = genai.GenerativeModel('gemini-1.5-flash')
 
+# --- 3. AUTENTICACIÓN GOOGLE DRIVE SIN ARCHIVO ---
 SCOPES = ['https://www.googleapis.com/auth/drive']
-SERVICE_ACCOUNT_FILE = 'credentials.json' # Assegura't que el nom coincideix amb el teu arxiu de GitHub Actions
-creds = service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
-drive_service = build('drive', 'v3', credentials=creds)
+creds_json_str = os.environ.get("GOOGLE_CREDENTIALS")
+
+if not creds_json_str:
+    print("❌ ERROR CRÍTICO: No se ha encontrado el secreto GOOGLE_CREDENTIALS.")
+    exit(1)
+
+try:
+    # Leemos las credenciales directamente de la variable de entorno (sin usar credentials.json)
+    creds_dict = json.loads(creds_json_str)
+    creds = service_account.Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
+    drive_service = build('drive', 'v3', credentials=creds)
+except Exception as e:
+    print(f"❌ ERROR leyendo las credenciales de Google: {e}")
+    exit(1)
+
 
 def es_frontal(image_bytes):
     try:
@@ -39,25 +52,21 @@ def es_frontal(image_bytes):
         ])
         return "SI" in response.text.upper()
     except Exception as e:
-        # SI LA IA FALLA, ES DESCARREGA IGUALMENT COM HAS DEMANAT
         print(f"⚠️ Error analitzant amb IA ({e}). Es descarregarà per seguretat.")
         return True 
 
 def main():
     print("Iniciant automatització...")
     
-    # 1. Obtenir la web
     response = requests.get(YUPOO_URL, headers=HEADERS)
     soup = BeautifulSoup(response.text, 'html.parser')
     
-    # 2. Extreure URLs de les fotos (adaptat a l'estructura de Yupoo)
     imatges_tags = soup.find_all('img')
     urls_imatges = []
     
     for img in imatges_tags:
         src = img.get('data-origin-src') or img.get('src')
         if src:
-            # Yupoo acostuma a posar URLs començant per '//'
             if src.startswith('//'):
                 src = 'https:' + src
             if 'yupoo.com' in src:
@@ -65,11 +74,9 @@ def main():
                 
     print(f"Trobades {len(urls_imatges)} imatges noves pendents de processar.")
 
-    # 3. Analitzar i pujar
     for i, img_url in enumerate(urls_imatges, 1):
         print(f"Analitzant imatge {i}/{len(urls_imatges)}...")
         
-        # Descarregar la foto amb les capçaleres correctes per evitar bloquejos
         img_res = requests.get(img_url, headers=HEADERS)
         
         if img_res.status_code != 200:
@@ -78,12 +85,11 @@ def main():
             
         image_bytes = img_res.content
 
-        # 4. Validació amb IA i pujada a Drive (amb l'ID de carpeta definit)
         if es_frontal(image_bytes):
             print("✅ És frontal o hi ha dubte. Pujant a Google Drive...")
             file_metadata = {
                 'name': f'Novedad_Frontal_{i}.jpg',
-                'parents': [DRIVE_FOLDER_ID] # SOLUCIONA L'ERROR DE QUOTA
+                'parents': [DRIVE_FOLDER_ID] 
             }
             media = MediaIoBaseUpload(io.BytesIO(image_bytes), mimetype='image/jpeg', resumable=True)
             
