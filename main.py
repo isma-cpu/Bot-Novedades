@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 import time
 import requests
@@ -11,16 +12,16 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 
-# ================= CONFIGURACIÓN =================
+# ================= CONFIGURACIÓ =================
 YUPOO_URL = "https://wavesoccer.x.yupoo.com/albums/7069514?uid=1&isSubCate=false&referrercate=2918263"
 FOLDER_NAME_DRIVE = "Novedades"
 CREDENTIALS_DICT = json.loads(os.environ.get("GCP_SA_KEY", "{}"))
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
-# ================= INICIALIZACIÓN =================
+# ================= INICIALITZACIÓ =================
 genai.configure(api_key=GEMINI_API_KEY)
-# Usamos el modelo Flash que es rapidísimo y tiene visión
-vision_model = genai.GenerativeModel('gemini-1.5-flash') 
+# Utilitzem la versió 'latest' per evitar errors 404 de servidor
+vision_model = genai.GenerativeModel('gemini-1.5-flash-latest') 
 
 def get_drive_service():
     creds = service_account.Credentials.from_service_account_info(
@@ -47,7 +48,6 @@ def create_folder(service, folder_name, parent_id=None):
     return folder.get('id')
 
 def get_or_create_state_file(service, parent_id):
-    """Guarda la memoria de URLs procesadas en el propio Drive para que persista"""
     query = f"name='processed_urls.json' and '{parent_id}' in parents and trashed=false"
     results = service.files().list(q=query, fields="files(id)").execute()
     
@@ -67,7 +67,6 @@ def update_state_file(service, parent_id, file_id, data):
         service.files().create(body=metadata, media_body=media).execute()
 
 def is_frontal_view(image_bytes):
-    """Usa la IA de Gemini para decidir si es foto frontal"""
     try:
         img = Image.open(BytesIO(image_bytes))
         prompt = """Eres un experto en equipaciones de fútbol. 
@@ -77,7 +76,7 @@ def is_frontal_view(image_bytes):
         response = vision_model.generate_content([prompt, img])
         return 'SI' in response.text.upper()
     except Exception as e:
-        print(f"Error analizando imagen: {e}")
+        print(f"⚠️ Error analitzant imatge amb IA: {e}")
         return False
 
 def scrape_yupoo_album():
@@ -85,8 +84,6 @@ def scrape_yupoo_album():
     r = requests.get(YUPOO_URL, headers=headers)
     soup = BeautifulSoup(r.text, 'html.parser')
     
-    # Yupoo suele guardar las imágenes en divs de clase 'showalbumheader__gallerycover' 
-    # o directamente en img tags. Buscamos todas las imágenes.
     images = soup.find_all('img')
     urls = []
     for img in images:
@@ -98,65 +95,74 @@ def scrape_yupoo_album():
     return urls
 
 def main():
-    print("Iniciando automatización Ninja...")
-    service = get_drive_service()
-    
-    # 1. Preparar carpetas en Drive
-    root_folder_id = get_folder_id(service, FOLDER_NAME_DRIVE)
-    if not root_folder_id:
-        print(f"¡Error! No se encontró la carpeta '{FOLDER_NAME_DRIVE}' compartida con la cuenta de servicio.")
-        return
+    print("Iniciant automatització...")
+    try:
+        service = get_drive_service()
+        
+        root_folder_id = get_folder_id(service, FOLDER_NAME_DRIVE)
+        if not root_folder_id:
+            print(f"❌ ¡Error! No s'ha trobat la carpeta '{FOLDER_NAME_DRIVE}'.")
+            return
 
-    today_str = datetime.now().strftime("%Y-%m-%d")
-    today_folder_id = get_folder_id(service, today_str, root_folder_id)
-    if not today_folder_id:
-        today_folder_id = create_folder(service, today_str, root_folder_id)
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        today_folder_id = get_folder_id(service, today_str, root_folder_id)
+        if not today_folder_id:
+            today_folder_id = create_folder(service, today_str, root_folder_id)
 
-    # 2. Cargar historial
-    processed_urls, state_file_id = get_or_create_state_file(service, root_folder_id)
+        processed_urls, state_file_id = get_or_create_state_file(service, root_folder_id)
 
-    # 3. Scrapear nuevas imágenes
-    all_urls = scrape_yupoo_album()
-    new_urls = [u for u in all_urls if u not in processed_urls]
-    
-    print(f"Encontradas {len(new_urls)} imágenes nuevas para analizar.")
-    
-    procesadas_hoy = 0
-    descartadas = 0
+        all_urls = scrape_yupoo_album()
+        new_urls = [u for u in all_urls if u not in processed_urls]
+        
+        print(f"Trobades {len(new_urls)} imatges noves pendents de processar.")
+        
+        procesadas_hoy = 0
+        descartadas = 0
+        
+        # Simulem ser un navegador real perquè Yupoo no ens bloquegi
+        headers = {'Referer': 'https://yupoo.com/', 'User-Agent': 'Mozilla/5.0'}
+        
+        for idx, url in enumerate(new_urls):
+            print(f"Analitzant imatge {idx+1}/{len(new_urls)}...")
+            try:
+                r = requests.get(url, headers=headers, timeout=15)
+                
+                # Comprovem que ens ha descarregat una imatge real i no una web d'error
+                if r.status_code == 200 and 'image' in r.headers.get('Content-Type', '').lower():
+                    if is_frontal_view(r.content):
+                        filename = f"camiseta_frontal_{today_str}_{idx}.jpg"
+                        media = MediaIoBaseUpload(BytesIO(r.content), mimetype='image/jpeg', resumable=True)
+                        file_metadata = {'name': filename, 'parents': [today_folder_id]}
+                        service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+                        procesadas_hoy += 1
+                        print(f"✅ ¡Frontal detectada! Pujada com {filename}")
+                    else:
+                        descartadas += 1
+                        print("❌ No és frontal. Descartada.")
+                else:
+                    print(f"⚠️ La web no ha retornat una imatge vàlida. Status: {r.status_code}")
+                
+                # Afegim l'URL a l'historial encara que hagi fallat, per no encallar-nos demà
+                processed_urls.append(url)
+                time.sleep(2) # Pausa necessària per no saturar l'API
+                
+            except Exception as e:
+                print(f"Error descarregant URL {idx+1}: {e}")
+        
+        # Desem l'historial finalment i creem el text
+        print("Guardant registre de memòria i text de TikTok a Drive...")
+        if procesadas_hoy > 0:
+            texto_tiktok = f"NOVEDADES ({today_str})\n\n¡Nuevas camisetas disponibles! Link en bio 🔥👕⚽\n#camisetasdefutbol #novedades"
+            media_txt = MediaIoBaseUpload(BytesIO(texto_tiktok.encode('utf-8')), mimetype='text/plain')
+            txt_metadata = {'name': f'Descripcion_TikTok_{today_str}.txt', 'parents': [today_folder_id]}
+            service.files().create(body=txt_metadata, media_body=media_txt).execute()
 
-    # 4. Procesar y filtrar con IA
-    headers = {'Referer': 'https://yupoo.com/'} # Yupoo a veces bloquea sin referer
-    
-    for idx, url in enumerate(new_urls):
-        print(f"Analizando imagen {idx+1}/{len(new_urls)}...")
-        r = requests.get(url, headers=headers)
-        if r.status_code == 200:
-            if is_frontal_view(r.content):
-                # Subir a drive
-                filename = f"camiseta_frontal_{today_str}_{idx}.jpg"
-                media = MediaIoBaseUpload(BytesIO(r.content), mimetype='image/jpeg', resumable=True)
-                file_metadata = {'name': filename, 'parents': [today_folder_id]}
-                service.files().create(body=file_metadata, media_body=media, fields='id').execute()
-                procesadas_hoy += 1
-                print(f"✅ ¡Frontal detectada! Subida como {filename}")
-            else:
-                descartadas += 1
-                print("❌ No es frontal. Descartada.")
-            
-            processed_urls.append(url)
-            time.sleep(2) # Respetar límites de la API
-    
-    # 5. Generar archivo de texto para TikTok
-    if procesadas_hoy > 0:
-        texto_tiktok = f"NOVEDADES ({today_str})\n\n¡Nuevas camisetas disponibles! Link en bio 🔥👕⚽\n#camisetasdefutbol #novedades"
-        media_txt = MediaIoBaseUpload(BytesIO(texto_tiktok.encode('utf-8')), mimetype='text/plain')
-        txt_metadata = {'name': f'Descripcion_TikTok_{today_str}.txt', 'parents': [today_folder_id]}
-        service.files().create(body=txt_metadata, media_body=media_txt).execute()
-
-    # 6. Guardar estado
-    update_state_file(service, root_folder_id, state_file_id, processed_urls)
-    
-    print(f"Resumen: {procesadas_hoy} subidas, {descartadas} descartadas.")
+        update_state_file(service, root_folder_id, state_file_id, processed_urls)
+        print(f"Resum del dia: {procesadas_hoy} pujades, {descartadas} descartades.")
+        
+    except Exception as e:
+        print(f"❌ Error crític general a l'script: {e}")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
