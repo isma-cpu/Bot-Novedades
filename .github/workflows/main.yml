@@ -1,0 +1,29 @@
+name: Bot Novedades Camisetas Diario
+
+on:
+  schedule:
+    # S'executa cada dia a les 09:00 AM hora d'Espanya (07:00 UTC)
+    - cron: '0 7 * * *'
+  workflow_dispatch: # Et permet donar-li al botó "Executa el flux de treball" manualment per provar
+
+jobs:
+  scrape-and-upload:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout del codi
+        uses: actions/checkout@v3
+
+      - name: Configurar Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Instal·lar dependències
+        run: pip install -r requirements.txt
+
+      - name: Executar script d'automatització
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+        run: python main.py
