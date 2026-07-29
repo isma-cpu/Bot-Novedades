@@ -1,18 +1,15 @@
 import os
 import io
-import json
+import base64
 import requests
 from bs4 import BeautifulSoup
 from PIL import Image
 import google.generativeai as genai
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseUpload
 
-# --- 1. CONFIGURACIÓN ---
+# --- 1. CONFIGURACIÓ ---
 YUPOO_URL = "https://wavesoccer.x.yupoo.com/albums/7069514?uid=1&isSubCate=false&referrercate=2918263"
-# PON AQUÍ EL ID DE TU CARPETA 'NOVEDADES'
-DRIVE_FOLDER_ID = "1lJqeU3-rsy83VDvIF6_AxFH5Qq_JA17C" 
+# AQUÍ TENIM LA URL DE LA TEVA APP WEB JA INCORPORADA:
+WEB_APP_URL = "https://script.google.com/macros/s/AKfycby6a5-b100c1__2Y85EehYlYKKf5zbEV5TudfgNEGh-e40NhGk2OmKrrDWYylK3XqiVbA/exec" 
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
@@ -21,27 +18,9 @@ HEADERS = {
     "Referer": "https://yupoo.com/" 
 }
 
-# --- 2. INICIALIZACIÓN ---
+# --- 2. INICIALITZACIÓ IA ---
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-1.5-flash')
-
-# --- 3. AUTENTICACIÓN GOOGLE DRIVE SIN ARCHIVO ---
-SCOPES = ['https://www.googleapis.com/auth/drive']
-creds_json_str = os.environ.get("GOOGLE_CREDENTIALS")
-
-if not creds_json_str:
-    print("❌ ERROR CRÍTICO: No se ha encontrado el secreto GOOGLE_CREDENTIALS.")
-    exit(1)
-
-try:
-    # Leemos las credenciales directamente de la variable de entorno (sin usar credentials.json)
-    creds_dict = json.loads(creds_json_str)
-    creds = service_account.Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
-    drive_service = build('drive', 'v3', credentials=creds)
-except Exception as e:
-    print(f"❌ ERROR leyendo las credenciales de Google: {e}")
-    exit(1)
-
 
 def es_frontal(image_bytes):
     try:
@@ -52,8 +31,22 @@ def es_frontal(image_bytes):
         ])
         return "SI" in response.text.upper()
     except Exception as e:
-        print(f"⚠️ Error analitzant amb IA ({e}). Es descarregarà per seguretat.")
+        print(f"⚠️ Error analitzant amb IA. Es descarregarà per seguretat.")
         return True 
+
+def pujar_a_drive(image_bytes, filename):
+    try:
+        # Convertim la imatge per enviar-la pel pont (Google Apps Script)
+        base64_data = base64.b64encode(image_bytes).decode('utf-8')
+        payload = {
+            "fileName": filename,
+            "mimeType": "image/jpeg",
+            "fileData": base64_data
+        }
+        resposta = requests.post(WEB_APP_URL, data=payload)
+        return resposta.text
+    except Exception as e:
+        return f"Error de connexió: {e}"
 
 def main():
     print("Iniciant automatització...")
@@ -87,17 +80,12 @@ def main():
 
         if es_frontal(image_bytes):
             print("✅ És frontal o hi ha dubte. Pujant a Google Drive...")
-            file_metadata = {
-                'name': f'Novedad_Frontal_{i}.jpg',
-                'parents': [DRIVE_FOLDER_ID] 
-            }
-            media = MediaIoBaseUpload(io.BytesIO(image_bytes), mimetype='image/jpeg', resumable=True)
+            resultat = pujar_a_drive(image_bytes, f'Novedad_Frontal_{i}.jpg')
             
-            try:
-                drive_service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+            if "OK" in resultat:
                 print("⬆️ Pujada correctament a la carpeta Novedades!")
-            except Exception as e:
-                print(f"❌ Error al pujar a Drive: {e}")
+            else:
+                print(f"❌ Error al pujar: {resultat}")
         else:
             print("❌ No és frontal. Descartada.")
 
