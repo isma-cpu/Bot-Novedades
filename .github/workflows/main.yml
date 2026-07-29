@@ -24,6 +24,6 @@ jobs:
 
       - name: Executar script d'automatització
         env:
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
         run: python main.py
